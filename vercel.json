@@ -1,0 +1,29 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "builds": [
+    {
+      "src": "backend/entrypoints/wsgi.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "15mb",
+        "runtime": "python3.12"
+      }
+    },
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    { "src": "/assets/(.*)", "dest": "/assets/$1" },
+    { "src": "/favicon.svg", "dest": "/favicon.svg" },
+    { "src": "/api/(.*)", "dest": "backend/entrypoints/wsgi.py" },
+    { "src": "/admin/(.*)", "dest": "backend/entrypoints/wsgi.py" },
+    { "src": "/static/(.*)", "dest": "backend/entrypoints/wsgi.py" },
+    { "src": "/health", "dest": "backend/entrypoints/wsgi.py" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
+}
