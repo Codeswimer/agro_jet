@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-// BMONI Enterprise Service Adapter (Production / Sandbox bridge)
 const BmoniServiceAdapter = {
   isProduction: false,
 
@@ -15,12 +14,12 @@ const BmoniServiceAdapter = {
         status: 'ACTIVE',
         firstName: payload.firstName || 'Bunch',
         lastName: payload.lastName || 'Dillon',
-        email: payload.email || 'farmer@agritech.bmoni.com',
+        email: payload.email || 'farmer@agrojet.bmoni.com',
         tier: 'TIER_2_VERIFIED',
         createdAt: new Date().toISOString()
       };
-      localStorage.setItem('bmoni_user_id', userId);
-      localStorage.setItem('bmoni_user_profile', JSON.stringify(userObj));
+      localStorage.setItem('agrojet_user_id', userId);
+      localStorage.setItem('agrojet_user_profile', JSON.stringify(userObj));
       return userObj;
     }
 
@@ -83,7 +82,7 @@ const BmoniServiceAdapter = {
 
     if (endpoint.includes('/v1/payments/initialize') && options.method === 'POST') {
       const body = JSON.parse(options.body || '{}');
-      const txRef = 'tx_bmoni_' + Math.random().toString(36).substring(2, 10);
+      const txRef = 'tx_agrojet_' + Math.random().toString(36).substring(2, 10);
       return {
         status: 'SUCCESS',
         txRef,
@@ -103,7 +102,7 @@ const BmoniServiceAdapter = {
   },
 
   async submitKyc(userId, kycData) {
-    localStorage.setItem('bmoni_kyc_data_' + userId, JSON.stringify(kycData));
+    localStorage.setItem('agrojet_kyc_data_' + userId, JSON.stringify(kycData));
     return this.request(`/v1/users/${userId}/kyc`, { method: 'PATCH', body: JSON.stringify(kycData) });
   },
 
@@ -328,14 +327,28 @@ const INITIAL_HARVEST_PRODUCE = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('corporatebuyers');
+  // Auth & Onboarding State: 'login', 'onboard', or 'dashboard'
+  const [authView, setAuthView] = useState('login');
+  const [loginEmail, setLoginEmail] = useState('farmer@agrojet.bmoni.com');
+  const [loginPin, setLoginPin] = useState('123456');
+
+  // Onboarding Form State
+  const [onboardForm, setOnboardForm] = useState({
+    firstName: 'Bunch',
+    lastName: 'Dillon',
+    email: 'bunch.dillon@example.com',
+    phoneNumber: '+2348030001122',
+    bvn: '95888168924'
+  });
+  const [onboardLoading, setOnboardLoading] = useState(false);
+
   const [userId, setUserId] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [activeTab, setActiveTab] = useState('corporatebuyers');
 
   // Live Console Logs Stream
   const [consoleLogs, setConsoleLogs] = useState([
-    { id: 1, type: 'INFO', time: new Date().toLocaleTimeString(), message: 'System initialized. BmoniService Adapter active in Sandbox Mode.' },
-    { id: 2, type: 'SUCCESS', time: new Date().toLocaleTimeString(), message: 'Mintlify index & OpenAPI definitions cached successfully.' }
+    { id: 1, type: 'INFO', time: new Date().toLocaleTimeString(), message: 'System initialized. AGRO JET connected to BMONI Payment Gateway & Escrow Rails.' }
   ]);
 
   // Balances
@@ -364,15 +377,14 @@ export default function App() {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentInitData, setPaymentInitData] = useState(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
-  const [paymentRail, setPaymentRail] = useState('cngn'); // 'cngn', 'bank_transfer', 'usdb', 'card'
+  const [paymentRail, setPaymentRail] = useState('cngn');
   const [paymentSuccessCallback, setPaymentSuccessCallback] = useState(null);
 
   // Mintlify docs state
   const [docContent, setDocContent] = useState('');
-  const [docLoading, setDocLoading] = useState(false);
   const [aiQuery, setAiQuery] = useState('');
   const [aiChatHistory, setAiChatHistory] = useState([
-    { role: 'assistant', text: 'Hello! I am your BMONI Embedded AI Assistant powered by BmoniService. How can I assist you with corporate off-takes, escrow rails, or BVN verification today?' }
+    { role: 'assistant', text: 'Hello! I am your AGRO JET & BMONI Embedded AI Assistant. How can I assist you with corporate off-takes, escrow rails, or BVN verification today?' }
   ]);
   const [aiLoading, setAiLoading] = useState(false);
   const [copiedNotification, setCopiedNotification] = useState('');
@@ -386,8 +398,6 @@ export default function App() {
 
   // Agri-Inputs & Import Pool State
   const [inputSubTab, setInputSubTab] = useState('importpools');
-  const [inputCategoryFilter, setInputCategoryFilter] = useState('All');
-  const [inputSearchQuery, setInputSearchQuery] = useState('');
   const [importPools, setImportPools] = useState(MOCK_IMPORT_POOLS);
   const [selectedPoolForJoin, setSelectedPoolForJoin] = useState(null);
   const [poolUnitsToOrder, setPoolUnitsToOrder] = useState(1);
@@ -401,7 +411,7 @@ export default function App() {
   const [escrowCurrency, setEscrowCurrency] = useState('cNGN');
   const [escrowSuccessMsg, setEscrowSuccessMsg] = useState('');
 
-  // Sandbox Onboarding Persona State
+  // Sandbox Onboarding Persona State inside dashboard
   const [kycProfile, setKycProfile] = useState({
     firstName: 'Bunch',
     lastName: 'Dillon',
@@ -442,42 +452,83 @@ export default function App() {
 
   const loadSessionState = async () => {
     try {
-      const uid = localStorage.getItem('bmoni_user_id');
-      if (uid) setUserId(uid);
-      const profile = localStorage.getItem('bmoni_user_profile');
-      if (profile) setUserProfile(JSON.parse(profile));
+      const uid = localStorage.getItem('agrojet_user_id');
+      const profile = localStorage.getItem('agrojet_user_profile');
+      if (uid && profile) {
+        setUserId(uid);
+        setUserProfile(JSON.parse(profile));
+        setAuthView('dashboard');
+      }
     } catch (e) {
       console.error(e);
     }
   };
 
+  const handleLoginSubmit = async (e) => {
+    e.preventDefault();
+    addLog('INFO', `[Auth] Authenticating session for ${loginEmail}...`);
+    try {
+      const user = await BmoniServiceAdapter.createUser({
+        firstName: 'Bunch',
+        lastName: 'Dillon',
+        email: loginEmail,
+        phone: '+2348030001122'
+      });
+      setUserId(user.userId);
+      setUserProfile(user);
+      setAuthView('dashboard');
+      addLog('SUCCESS', `[Auth] Login successful. Welcome back, ${user.firstName}!`);
+    } catch (err) {
+      addLog('WARN', '[Auth] Login failed');
+    }
+  };
+
+  const handleOnboardSubmit = async (e) => {
+    e.preventDefault();
+    setOnboardLoading(true);
+    try {
+      // 1. Create user
+      const user = await BmoniServiceAdapter.createUser({
+        firstName: onboardForm.firstName,
+        lastName: onboardForm.lastName,
+        email: onboardForm.email,
+        phone: onboardForm.phoneNumber
+      });
+
+      // 2. BVN Lookup verification
+      await BmoniServiceAdapter.bvnLookup(onboardForm.bvn);
+
+      setUserId(user.userId);
+      setUserProfile(user);
+      addLog('SUCCESS', `[Onboarding] Successfully registered & NIBSS verified user ${user.userId}`);
+      setAuthView('dashboard');
+    } catch (err) {
+      addLog('WARN', `[Onboarding Error] ${err.message || 'Onboarding failed'}`);
+    } finally {
+      setOnboardLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('agrojet_user_id');
+    localStorage.removeItem('agrojet_user_profile');
+    setUserId(null);
+    setUserProfile(null);
+    setAuthView('login');
+    addLog('INFO', '[Auth] User logged out successfully.');
+  };
+
   const fetchMintlifyDocs = async () => {
-    setDocLoading(true);
     try {
       const response = await fetch('https://bkey.mintlify.site/llms.txt').catch(() => null);
       if (response && response.ok) {
         const text = await response.text();
         setDocContent(text);
-        addLog('INFO', '[Mintlify Index] Fetched live llms.txt index from bkey.mintlify.site');
       } else {
-        throw new Error('CORS or offline fallback');
+        setDocContent(`# AGRO JET & BMONI Embedded Documentation Index (Cached)\nBase URL: https://api.bmoni.com/docs`);
       }
     } catch (err) {
-      setDocContent(`# BMONI Embedded Documentation Index (Cached / Sandbox Mode)
-
-> Base URL: https://api.bmoni.com/docs
-> SDK Version: @bmoni/embedded-sdk v2.4.0
-
-## Core Modules & API Services
-1. BmoniService.createUser(payload) - Initializes high-volume agritech user sessions
-2. BmoniService.bvnLookup(bvn) - Instant 11-digit NIBSS identity verification
-3. BmoniService.submitKyc(userId, data) - Tiered KYC submission & business verification
-4. BmoniService.createEscrow(params) - Multi-currency (cNGN, USDB, NGN) smart escrow contract locking
-5. BmoniService.initializePayment(params) - BMONI payment gateway initialization for instant checkout rails
-6. Corporate Offtake Rail - FMCG factory raw material sourcing contracts with bank-grade guarantees`);
-      addLog('INFO', '[Mintlify Index] Loaded robust cached documentation index.');
-    } finally {
-      setDocLoading(false);
+      setDocContent(`# AGRO JET & BMONI Embedded Documentation Index (Cached)`);
     }
   };
 
@@ -492,20 +543,18 @@ export default function App() {
 
     try {
       const apiKey = '';
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ role: 'user', parts: [{ text: `You are the BMONI Embedded Agritech Assistant. Reference these docs:\n${docContent}\n\nUser Question: ${userText}` }] }]
+          contents: [{ role: 'user', parts: [{ text: `You are the AGRO JET & BMONI Embedded Agritech Assistant. Reference these docs:\n${docContent}\n\nUser Question: ${userText}` }] }]
         })
       });
       const result = await response.json();
-      const answer = result?.candidates?.[0]?.content?.parts?.[0]?.text || "BMONI provides multi-currency smart escrow settlement for agricultural off-take contracts. BVNs are verified instantly via NIBSS rails.";
+      const answer = result?.candidates?.[0]?.content?.parts?.[0]?.text || "AGRO JET provides multi-currency smart escrow settlement for agricultural off-take contracts powered by the BMONI Payment API.";
       setAiChatHistory(prev => [...prev, { role: 'assistant', text: answer }]);
-      addLog('API_CALL', `[AI Assistant] Responded to query: "${userText.substring(0, 30)}..."`);
     } catch (err) {
-      let fallbackText = "For BVN verification, provide an 11-digit BVN (e.g., 95888168924). For Escrow, select any produce item in the Harvest Marketplace to lock funds into cNGN or USDB smart contracts.";
-      setAiChatHistory(prev => [...prev, { role: 'assistant', text: fallbackText }]);
+      setAiChatHistory(prev => [...prev, { role: 'assistant', text: "For BVN verification, provide an 11-digit BVN (e.g., 95888168924). For Escrow, select any produce item in the Harvest Marketplace." }]);
     } finally {
       setAiLoading(false);
     }
@@ -514,13 +563,6 @@ export default function App() {
   const copyToClipboard = (text, label) => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text);
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
     }
     setCopiedNotification(label);
     setTimeout(() => setCopiedNotification(''), 2500);
@@ -535,9 +577,9 @@ export default function App() {
     try {
       const initRes = await BmoniServiceAdapter.initializePayment({ amount, currency, item: itemTitle });
       setPaymentInitData(initRes);
-      addLog('API_CALL', `[BMONI Payment] Initialized payment session ${initRes.txRef} for ${currency} ${amount.toLocaleString()}`);
+      addLog('API_CALL', `[BMONI Payment API] Initialized checkout session ${initRes.txRef} for ${currency} ${amount.toLocaleString()}`);
     } catch (e) {
-      addLog('WARN', '[BMONI Payment] Failed to initialize payment gateway gateway session');
+      addLog('WARN', '[BMONI Payment API] Failed to initialize payment gateway session');
     } finally {
       setPaymentLoading(false);
     }
@@ -550,23 +592,17 @@ export default function App() {
     const curr = paymentInitData.currency;
 
     if (paymentRail === 'cngn' || curr === 'cNGN') {
-      if (cngnBalance < amt) {
-        setCngnBalance(prev => prev + amt * 2);
-      }
+      if (cngnBalance < amt) setCngnBalance(prev => prev + amt * 2);
       setCngnBalance(prev => Math.max(0, prev - amt));
     } else if (paymentRail === 'usdb' || curr === 'USDB' || curr === 'USD') {
-      if (usdBalance < amt) {
-        setUsdBalance(prev => prev + amt * 2);
-      }
+      if (usdBalance < amt) setUsdBalance(prev => prev + amt * 2);
       setUsdBalance(prev => Math.max(0, prev - amt));
     } else {
-      if (ngnBalance < amt) {
-        setNgnBalance(prev => prev + amt * 2);
-      }
+      if (ngnBalance < amt) setNgnBalance(prev => prev + amt * 2);
       setNgnBalance(prev => Math.max(0, prev - amt));
     }
 
-    addLog('SUCCESS', `[BMONI Payment Gateway] Transaction ${paymentInitData.txRef} successfully completed via ${paymentRail.toUpperCase()}`);
+    addLog('SUCCESS', `[BMONI Payment API] Transaction ${paymentInitData.txRef} successfully completed via ${paymentRail.toUpperCase()}`);
     
     if (paymentSuccessCallback) {
       paymentSuccessCallback(paymentInitData);
@@ -583,11 +619,6 @@ export default function App() {
                           buyer.location.toLowerCase().includes(buyerSearchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
-
-  const handleApplyForOfftake = (buyer) => {
-    setSelectedBuyerForProposal(buyer);
-    setProposalSubmittedSuccess('');
-  };
 
   const handleSubmitSupplyProposal = async (e) => {
     e.preventDefault();
@@ -612,7 +643,7 @@ export default function App() {
           {
             id: res.contractId,
             crop: selectedBuyerForProposal.rawMaterialNeeded,
-            seller: 'You (Offtake Supplier)',
+            seller: 'You (AGRO JET Supplier)',
             buyer: selectedBuyerForProposal.companyName,
             quantity: `${tonnage} MT`,
             totalAmount: totalContractValue,
@@ -628,17 +659,12 @@ export default function App() {
         setTimeout(() => {
           setSelectedBuyerForProposal(null);
           setFarmerTonnageOffer('');
-        }, 2500);
+          setProposalSubmittedSuccess('');
+        }, 1500);
       } catch (err) {
         addLog('WARN', `[Offtake Proposal Error] ${err.message || 'Failed to submit proposal'}`);
       }
     });
-  };
-
-  const handleJoinImportPool = (pool) => {
-    setSelectedPoolForJoin(pool);
-    setPoolUnitsToOrder(1);
-    setPoolSuccessMsg('');
   };
 
   const handleConfirmPoolParticipation = (e) => {
@@ -662,13 +688,13 @@ export default function App() {
       }));
 
       addLog('SUCCESS', `[Group Import Escrow] Locked deposit for ${qty}x unit(s) of "${selectedPoolForJoin.title}" ($${totalCostUSD.toLocaleString()} USD) in BMONI Escrow.`);
-      setPoolSuccessMsg(`Successfully joined import pool! Funds ($${totalCostUSD.toLocaleString()} USD) are safely locked in BMONI Group Import Escrow.`);
+      setPoolSuccessMsg(`Successfully joined import pool! Funds ($${totalCostUSD.toLocaleString()} USD) are safely locked.`);
 
       setTimeout(() => {
         setSelectedPoolForJoin(null);
         setPoolUnitsToOrder(1);
         setPoolSuccessMsg('');
-      }, 2800);
+      }, 1500);
     });
   };
 
@@ -685,7 +711,7 @@ export default function App() {
       setTimeout(() => {
         setSelectedMerchantItem(null);
         setMerchantBuySuccessMsg('');
-      }, 2500);
+      }, 1500);
     });
   };
 
@@ -710,7 +736,7 @@ export default function App() {
           id: res.contractId,
           crop: selectedProduceForEscrow.crop,
           seller: selectedProduceForEscrow.seller,
-          buyer: 'You (Active User)',
+          buyer: 'You (AGRO JET User)',
           quantity: `${qty} ${selectedProduceForEscrow.unit}`,
           totalAmount,
           currency: escrowCurrency,
@@ -721,13 +747,13 @@ export default function App() {
         };
 
         setActiveEscrowContracts(prev => [newContract, ...prev]);
-        addLog('SUCCESS', `[Smart Escrow ${res.contractId}] Locked ${escrowCurrency} ${totalAmount.toLocaleString()} for ${qty} ${selectedProduceForEscrow.unit} of ${selectedProduceForEscrow.crop}`);
+        addLog('SUCCESS', `[Smart Escrow ${res.contractId}] Locked ${escrowCurrency} ${totalAmount.toLocaleString()} for ${qty} ${selectedProduceForEscrow.unit}`);
         setEscrowSuccessMsg(`Smart Escrow contract ${res.contractId} created & funds locked in BMONI Ledger!`);
 
         setTimeout(() => {
           setSelectedProduceForEscrow(null);
           setEscrowSuccessMsg('');
-        }, 2500);
+        }, 1500);
       } catch (err) {
         addLog('WARN', `[Escrow Execution Error] ${err.message}`);
       }
@@ -742,23 +768,6 @@ export default function App() {
       return c;
     }));
     addLog('SUCCESS', `[Escrow Settlement] Quality verified for ${contractId}. Funds released to seller wallet!`);
-  };
-
-  const handleCreateUserSandbox = async () => {
-    try {
-      const user = await BmoniServiceAdapter.createUser({
-        firstName: kycProfile.firstName,
-        lastName: kycProfile.lastName,
-        email: kycProfile.email,
-        phone: kycProfile.phoneNumber
-      });
-      setUserId(user.userId);
-      setUserProfile(user);
-      setKycProfile(prev => ({ ...prev, step: 2 }));
-      addLog('SUCCESS', `[User Management] Created BMONI user account: ${user.userId}`);
-    } catch (err) {
-      addLog('WARN', `[User Creation Error] ${err.message}`);
-    }
   };
 
   const handlePerformBvnLookup = async (bvnToTest) => {
@@ -783,781 +792,889 @@ export default function App() {
     });
   };
 
+  // -------------------------------------------------------------------------
+  // RENDER AUTH VIEWS (LOGIN / ONBOARDING) IF NOT LOGGED IN
+  // -------------------------------------------------------------------------
+  if (authView !== 'dashboard') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-950 flex flex-col justify-center items-center p-4 sm:p-6 font-sans text-gray-100">
+        <div className="max-w-md w-full bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl space-y-6">
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center justify-center bg-emerald-500 text-emerald-950 font-black px-4 py-2 rounded-2xl text-sm tracking-wider shadow-lg">
+              AGRO JET 🚀
+            </div>
+            <h1 className="text-2xl font-black tracking-tight text-white mt-2">
+              {authView === 'login' ? 'Welcome Back to AGRO JET' : 'Create Your AGRO JET Account'}
+            </h1>
+            <p className="text-xs text-emerald-200">
+              {authView === 'login' ? 'Sign in to access your BMONI escrow & agricultural rails' : 'Fast onboarding with NIBSS BVN verification & multi-currency rails'}
+            </p>
+          </div>
+
+          {authView === 'login' ? (
+            <form onSubmit={handleLoginSubmit} className="space-y-4">
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-emerald-200">Email Address / Farmer ID</label>
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  className="w-full px-4 py-3 text-xs bg-white text-gray-900 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-400 font-medium"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-emerald-200">Signing PIN (6-Digit)</label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  value={loginPin}
+                  onChange={(e) => setLoginPin(e.target.value)}
+                  className="w-full px-4 py-3 text-xs bg-white text-gray-900 border border-gray-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-400 font-mono font-bold"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-extrabold py-3.5 rounded-2xl text-xs shadow-lg transition-all transform active:scale-95"
+              >
+                Sign In to AGRO JET
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAuthView('onboard')}
+                  className="text-xs text-emerald-300 hover:text-white underline font-semibold transition-all"
+                >
+                  Don't have an account? Sign up / Onboard
+                </button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={handleOnboardSubmit} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-emerald-200">First Name</label>
+                  <input
+                    type="text"
+                    value={onboardForm.firstName}
+                    onChange={(e) => setOnboardForm(prev => ({ ...prev, firstName: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl"
+                    required
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block text-xs font-semibold text-emerald-200">Last Name</label>
+                  <input
+                    type="text"
+                    value={onboardForm.lastName}
+                    onChange={(e) => setOnboardForm(prev => ({ ...prev, lastName: e.target.value }))}
+                    className="w-full px-3 py-2.5 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-emerald-200">Email Address</label>
+                <input
+                  type="email"
+                  value={onboardForm.email}
+                  onChange={(e) => setOnboardForm(prev => ({ ...prev, email: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-emerald-200">Phone Number (E.164)</label>
+                <input
+                  type="text"
+                  value={onboardForm.phoneNumber}
+                  onChange={(e) => setOnboardForm(prev => ({ ...prev, phoneNumber: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl font-mono"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-emerald-200">11-Digit BVN (NIBSS Sandbox)</label>
+                <input
+                  type="text"
+                  maxLength={11}
+                  value={onboardForm.bvn}
+                  onChange={(e) => setOnboardForm(prev => ({ ...prev, bvn: e.target.value }))}
+                  className="w-full px-3.5 py-2.5 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl font-mono"
+                  placeholder="95888168924"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={onboardLoading}
+                className="w-full bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-extrabold py-3.5 rounded-2xl text-xs shadow-lg transition-all"
+              >
+                {onboardLoading ? 'Verifying NIBSS BVN & Creating Wallet...' : 'Complete Onboarding & Start'}
+              </button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => setAuthView('login')}
+                  className="text-xs text-emerald-300 hover:text-white underline font-semibold transition-all"
+                >
+                  Already have an account? Sign in
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // RENDER DASHBOARD VIEW ONCE LOGGED IN
+  // -------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-800">
       
       {/* Header */}
       <header className="bg-emerald-900 text-white px-4 sm:px-6 py-4 flex flex-col lg:flex-row justify-between items-start lg:items-center shadow-md gap-4">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full lg:w-auto">
-          <div className="bg-emerald-600 text-white font-bold px-3 py-1.5 rounded-lg text-xs tracking-wider shadow-sm shrink-0">
-            BMONI Enterprise SDK v2.4
+          <div className="bg-emerald-500 text-emerald-950 font-black px-3.5 py-1.5 rounded-lg text-xs tracking-wider shadow-sm shrink-0">
+            AGRO JET 🚀
           </div>
           <div>
             <h1 className="text-base sm:text-lg font-bold leading-snug tracking-wide">
-              Agritech BMONI Platform — Modular Service Adapter & Payment Integration
+              AGRO JET — Powered by BMONI Payment API & Escrow Rails
             </h1>
             <p className="text-xs text-emerald-200">
-              Active Adapter: <code className="bg-emerald-950 px-2 py-0.5 rounded text-emerald-300 font-mono">BmoniServiceAdapter</code> (Sandbox Bridge)
+              Active Gateway: <code className="bg-emerald-950 px-2 py-0.5 rounded text-emerald-300 font-mono">BmoniPaymentAPI</code> (Sandbox Mode)
             </p>
           </div>
         </div>
 
-        {/* Balance Drawer & User Identity */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto justify-start lg:justify-end border-t border-emerald-800 lg:border-t-0 pt-3 lg:pt-0">
-          <div className="bg-emerald-800/80 border border-emerald-700/80 px-3 py-1.5 rounded-lg text-xs font-mono whitespace-nowrap flex items-center gap-3">
-            <span>NGN: <strong className="text-emerald-300">₦{ngnBalance.toLocaleString()}</strong></span>
-            <span className="text-emerald-600">|</span>
-            <span>cNGN: <strong className="text-emerald-300">₦{cngnBalance.toLocaleString()}</strong></span>
-            <span className="text-emerald-600">|</span>
-            <span>USD: <strong className="text-emerald-300">${usdBalance.toLocaleString()}</strong></span>
+        {/* Balance Drawer & User Identity & Logout */}
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4 w-full lg:w-auto justify-between lg:justify-end">
+          <div className="bg-emerald-950/80 border border-emerald-800/60 px-3 py-1.5 rounded-xl flex items-center gap-3 text-xs">
+            <div>
+              <span className="text-emerald-400 block text-[10px] uppercase font-semibold">NGN Fiat</span>
+              <span className="font-mono font-bold text-white">₦{ngnBalance.toLocaleString()}</span>
+            </div>
+            <div className="w-px h-6 bg-emerald-800"></div>
+            <div>
+              <span className="text-emerald-400 block text-[10px] uppercase font-semibold">cNGN Stable</span>
+              <span className="font-mono font-bold text-white">₦{cngnBalance.toLocaleString()}</span>
+            </div>
+            <div className="w-px h-6 bg-emerald-800"></div>
+            <div>
+              <span className="text-emerald-400 block text-[10px] uppercase font-semibold">USDB Stable</span>
+              <span className="font-mono font-bold text-white">${usdBalance.toLocaleString()}</span>
+            </div>
           </div>
 
-          <button
-            onClick={() => {
-              setNgnBalance(prev => prev + 500000);
-              setCngnBalance(prev => prev + 100000);
-              setUsdBalance(prev => prev + 500);
-              addLog('INFO', '[Sandbox Wallet] Added top-up funds to all currency accounts.');
-            }}
-            className="bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border border-emerald-600 transition-colors"
-          >
-            + Top Up Wallet
-          </button>
-
-          <span className={`text-xs px-2.5 py-1 rounded-full font-medium border whitespace-nowrap ${userId ? 'bg-emerald-100 text-emerald-800 border-emerald-700' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>
-            {userId ? `User: ${userId}` : 'Session: Guest'}
-          </span>
-
+          <div className="flex items-center gap-2 bg-emerald-950/50 border border-emerald-800 px-3 py-1.5 rounded-xl text-xs">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+            <span className="font-medium text-emerald-100 truncate max-w-[120px]">
+              {userProfile ? `${userProfile.firstName} ${userProfile.lastName}` : 'Guest'}
+            </span>
+            <button
+              onClick={handleLogout}
+              className="ml-2 bg-red-600/80 hover:bg-red-600 text-white px-2 py-0.5 rounded text-[10px] font-bold transition-all"
+              title="Logout"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Navigation Bar */}
-      <nav className="bg-white border-b border-gray-200 px-4 sm:px-6 flex space-x-1 sm:space-x-4 overflow-x-auto whitespace-nowrap scrollbar-thin">
+      <nav className="bg-white border-b border-gray-200 px-4 sm:px-6 flex overflow-x-auto shadow-sm">
         {[
-          { id: 'corporatebuyers', label: '🏭 Factory Buyer Offtake' },
-          { id: 'inputmerchants', label: '🌱 Inputs & Group Import' },
-          { id: 'marketplace', label: '🌾 Harvest Produce & Escrow' },
-          { id: 'escrowledger', label: '🛡️ Active Escrow Contracts' },
-          { id: 'aiassistant', label: '🤖 Built-in AI Assistant' },
-          { id: 'personas', label: '👥 Onboarding & BVN Sandbox' },
-          { id: 'docsindex', label: '📖 Mintlify llms.txt Index' },
-          { id: 'aiconfig', label: '⚙️ API & Payment Gateway Terminal' },
-        ].map((tab) => (
+          { id: 'corporatebuyers', label: '🌾 Corporate Offtake Match', badge: '5 Buyers' },
+          { id: 'harvestmarket', label: '🛒 Harvest Produce Marketplace', badge: 'Escrow' },
+          { id: 'inputs', label: '🚜 Agri-Inputs & Import Pool', badge: 'Group Save' },
+          { id: 'escrowledger', label: '🔒 Smart Escrow Ledger', badge: activeEscrowContracts.length },
+          { id: 'sandboxkyc', label: '🛡️ NIBSS BVN & Onboarding', badge: 'Live API' },
+          { id: 'docs', label: '📚 Mintlify & AI Assistant', badge: 'Docs' }
+        ].map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`py-3 px-3 text-xs sm:text-sm font-medium border-b-2 shrink-0 transition-colors ${
+            className={`px-4 py-3 text-xs sm:text-sm font-semibold whitespace-nowrap border-b-2 transition-all flex items-center gap-2 shrink-0 ${
               activeTab === tab.id
-                ? 'border-emerald-600 text-emerald-700 font-bold'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+                : 'border-transparent text-gray-600 hover:text-emerald-600 hover:bg-gray-50'
             }`}
           >
             {tab.label}
+            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+              activeTab === tab.id ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-700'
+            }`}>
+              {tab.badge}
+            </span>
           </button>
         ))}
       </nav>
 
-      {/* Main Body Grid */}
-      <main className="flex-1 p-4 sm:p-6 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Copied Notification Toast */}
+      {copiedNotification && (
+        <div className="fixed bottom-6 right-6 z-50 bg-gray-900 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-xs border border-gray-700 animate-bounce">
+          <span className="text-emerald-400 font-bold">✓ Copied</span>
+          <span>{copiedNotification}</span>
+        </div>
+      )}
+
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        
+        {/* Left & Center Columns (Main Tab View) */}
         <div className="lg:col-span-2 space-y-6">
 
-          {/* TAB 1: CORPORATE BUYER OFFTAKE */}
+          {/* TAB 1: CORPORATE BUYERS MATCH */}
           {activeTab === 'corporatebuyers' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-              <div className="border-b pb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
-                <div>
-                  <h2 className="text-base sm:text-lg font-bold text-gray-900 flex items-center gap-2">
-                    <span>🏭 Corporate Buyer Offtake & Supply Match</span>
-                  </h2>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Connect verified agricultural cooperatives directly with FMCG processors backed by BMONI Escrow & Payment rails.
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-emerald-800 to-teal-900 text-white p-6 rounded-2xl shadow-md relative overflow-hidden">
+                <div className="relative z-10 space-y-2">
+                  <span className="bg-emerald-500/30 text-emerald-200 text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider">
+                    AGRO JET Industrial Offtake Bridge
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-extrabold">Match Farm Produce Directly with Corporate Offtakers</h2>
+                  <p className="text-xs sm:text-sm text-emerald-100 max-w-2xl leading-relaxed">
+                    Connect your harvest directly to blue-chip processing plants (Nestlé, Psaltry, Olam, UAC) with guaranteed payment settlements locked in BMONI multi-currency escrow rails.
                   </p>
-                </div>
-                <div className="flex items-center gap-2 w-full md:w-auto">
-                  <input
-                    type="text"
-                    placeholder="Search buyers or raw materials..."
-                    value={buyerSearchQuery}
-                    onChange={(e) => setBuyerSearchQuery(e.target.value)}
-                    className="text-xs px-3 py-2 border rounded-lg w-full md:w-48 focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white text-gray-900 placeholder-gray-400"
-                  />
-                  <select
-                    value={selectedCropCategory}
-                    onChange={(e) => setSelectedCropCategory(e.target.value)}
-                    className="text-xs px-3 py-2 border rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white text-gray-900"
-                  >
-                    <option value="All">All Categories</option>
-                    <option value="Maize">Maize</option>
-                    <option value="Cassava">Cassava</option>
-                    <option value="Soybeans">Soybeans</option>
-                    <option value="Sesame">Sesame</option>
-                  </select>
                 </div>
               </div>
 
-              {selectedBuyerForProposal && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded">
-                        Active Offtake Binding
-                      </span>
-                      <h3 className="text-sm font-bold text-emerald-900 mt-1">
-                        Supply Offer for {selectedBuyerForProposal.companyName}
-                      </h3>
-                      <p className="text-xs text-emerald-700">
-                        Needed: {selectedBuyerForProposal.rawMaterialNeeded} | Offer Price: <strong className="text-emerald-900">{selectedBuyerForProposal.offerPrice}</strong>
-                      </p>
-                    </div>
+              {/* Filters & Search */}
+              <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col sm:flex-row gap-3 justify-between items-center">
+                <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0">
+                  {['All', 'Maize', 'Cassava', 'Soybeans', 'Sesame'].map(cat => (
                     <button
-                      onClick={() => setSelectedBuyerForProposal(null)}
-                      className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold"
+                      key={cat}
+                      onClick={() => setSelectedCropCategory(cat)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                        selectedCropCategory === cat
+                          ? 'bg-emerald-700 text-white shadow-sm'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                      }`}
                     >
-                      ✕ Cancel
+                      {cat}
                     </button>
-                  </div>
-
-                  {proposalSubmittedSuccess ? (
-                    <div className="bg-white border border-emerald-300 p-4 rounded-lg text-center space-y-2">
-                      <div className="text-emerald-600 font-bold text-sm">🎉 Supply Proposal & BMONI Escrow Initialized!</div>
-                      <p className="text-xs text-gray-600">{proposalSubmittedSuccess}</p>
-                    </div>
-                  ) : (
-                    <form onSubmit={handleSubmitSupplyProposal} className="space-y-3">
-                      <div>
-                        <label className="text-xs font-medium text-emerald-900 block mb-1">
-                          Your Tonnage Offer (Metric Tons - MT)
-                        </label>
-                        <input
-                          type="number"
-                          required
-                          min="1"
-                          placeholder="e.g. 50"
-                          value={farmerTonnageOffer}
-                          onChange={(e) => setFarmerTonnageOffer(e.target.value)}
-                          className="w-full text-sm p-2.5 border border-emerald-300 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none bg-white text-gray-900 placeholder-gray-400"
-                        />
-                      </div>
-                      {farmerTonnageOffer && !isNaN(farmerTonnageOffer) && (
-                        <div className="text-xs bg-white p-3 rounded border border-emerald-200 text-emerald-900 flex justify-between items-center">
-                          <span>Computed Contract Gross Value:</span>
-                          <strong className="text-sm font-mono text-emerald-700">
-                            ₦{(parseFloat(farmerTonnageOffer) * selectedBuyerForProposal.unitPriceNumeric).toLocaleString()} NGN
-                          </strong>
-                        </div>
-                      )}
-                      <button
-                        type="submit"
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-lg text-xs shadow-sm transition-colors flex items-center justify-center gap-2"
-                      >
-                        <span>🔒 Pay & Lock Escrow via BMONI Gateway</span>
-                      </button>
-                    </form>
-                  )}
+                  ))}
                 </div>
-              )}
 
+                <div className="w-full sm:w-72">
+                  <input
+                    type="text"
+                    placeholder="Search company or location..."
+                    value={buyerSearchQuery}
+                    onChange={(e) => setBuyerSearchQuery(e.target.value)}
+                    className="w-full px-3.5 py-2 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Corporate Buyer Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {filteredCorporateBuyers.map(buyer => (
-                  <div key={buyer.id} className="border border-gray-200 rounded-xl p-4 hover:border-emerald-500 transition-colors flex flex-col justify-between space-y-3 bg-white">
-                    <div className="space-y-2">
+                  <div key={buyer.id} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between space-y-4">
+                    <div className="space-y-3">
                       <div className="flex justify-between items-start">
-                        <span className="text-[10px] bg-gray-100 text-gray-700 font-medium px-2 py-0.5 rounded">
-                          {buyer.industry}
-                        </span>
-                        <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                          {buyer.offerPrice}
-                        </span>
+                        <div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md">
+                            {buyer.industry}
+                          </span>
+                          <h3 className="font-bold text-base text-gray-900 mt-1">{buyer.companyName}</h3>
+                        </div>
+                        {buyer.verifiedBuyer && (
+                          <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-lg font-semibold flex items-center gap-1">
+                            ✓ Verified Buyer
+                          </span>
+                        )}
                       </div>
-                      <h3 className="text-sm font-bold text-gray-900">{buyer.companyName}</h3>
-                      <p className="text-xs text-gray-600 font-medium">
-                        🌾 <span className="text-emerald-800">{buyer.rawMaterialNeeded}</span>
-                      </p>
-                      <p className="text-xs text-gray-500">📍 {buyer.location}</p>
-                      <div className="flex flex-wrap gap-1 pt-1">
+
+                      <div className="bg-gray-50 rounded-xl p-3 space-y-1.5 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Raw Material Needed:</span>
+                          <span className="font-semibold text-gray-900 text-right">{buyer.rawMaterialNeeded}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Monthly Volume:</span>
+                          <span className="font-bold text-emerald-700">{buyer.monthlyVolumeReq}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Offer Price:</span>
+                          <span className="font-mono font-bold text-gray-900">{buyer.offerPrice}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Escrow Deposit:</span>
+                          <span className="font-mono text-emerald-600 font-semibold">{buyer.escrowDepositLocked}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Location:</span>
+                          <span className="text-gray-700">{buyer.location}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5">
                         {buyer.qualitySpecs.map((spec, i) => (
-                          <span key={i} className="text-[10px] bg-gray-50 border text-gray-600 px-1.5 py-0.5 rounded">
-                            ✓ {spec}
+                          <span key={i} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-medium">
+                            • {spec}
                           </span>
                         ))}
                       </div>
                     </div>
 
-                    <div className="border-t pt-3 flex items-center justify-between text-xs">
-                      <div>
-                        <span className="text-gray-500 block text-[10px]">Escrow Guarantee:</span>
-                        <span className="font-semibold text-emerald-700">{buyer.escrowDepositLocked}</span>
-                      </div>
-                      <button
-                        onClick={() => handleApplyForOfftake(buyer)}
-                        className="bg-emerald-800 hover:bg-emerald-900 text-white font-medium px-3 py-1.5 rounded-lg text-xs shadow-sm transition-colors"
-                      >
-                        Submit Supply Offer
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => setSelectedBuyerForProposal(buyer)}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                    >
+                      <span>🤝 Supply to Offtaker & Lock Escrow</span>
+                    </button>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* TAB 2: INPUTS & GROUP IMPORT POOL */}
-          {activeTab === 'inputmerchants' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-              <div className="border-b pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                <div>
-                  <h2 className="text-base sm:text-lg font-bold text-gray-950">🌱 Agri-Inputs Marketplace & Group Import Pools</h2>
-                  <p className="text-xs text-gray-500">Co-op bulk purchasing for heavy machinery, irrigation kits, and certified seeds with BMONI escrow protection.</p>
-                </div>
-                <div className="flex bg-gray-100 p-1 rounded-lg text-xs font-medium">
-                  <button
-                    onClick={() => setInputSubTab('importpools')}
-                    className={`px-3 py-1.5 rounded-md transition-all ${inputSubTab === 'importpools' ? 'bg-white text-emerald-900 shadow-sm font-bold' : 'text-gray-600'}`}
-                  >
-                    Global Import Pools ({importPools.length})
-                  </button>
-                  <button
-                    onClick={() => setInputSubTab('merchants')}
-                    className={`px-3 py-1.5 rounded-md transition-all ${inputSubTab === 'merchants' ? 'bg-white text-emerald-900 shadow-sm font-bold' : 'text-gray-600'}`}
-                  >
-                    Local Agri-Inputs ({MOCK_AGRI_INPUTS.length})
-                  </button>
-                </div>
+          {/* TAB 2: HARVEST PRODUCE MARKETPLACE */}
+          {activeTab === 'harvestmarket' && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-teal-800 to-emerald-900 text-white p-6 rounded-2xl shadow-md">
+                <span className="bg-teal-500/30 text-teal-200 text-[10px] font-bold px-2.5 py-1 rounded-md uppercase tracking-wider">
+                  Verified Farmer Listings
+                </span>
+                <h2 className="text-xl sm:text-2xl font-extrabold mt-2">Source Cleaned & Graded Farm Produce</h2>
+                <p className="text-xs sm:text-sm text-teal-100 mt-1">
+                  Purchase certified grains and tubers directly from farmer cooperatives with automated BMONI escrow protection.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {INITIAL_HARVEST_PRODUCE.map(prod => (
+                  <div key={prod.id} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4 flex flex-col justify-between">
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-[10px] bg-teal-50 text-teal-800 font-bold px-2 py-0.5 rounded">
+                            {prod.seller}
+                          </span>
+                          <h3 className="font-bold text-base text-gray-900 mt-1">{prod.crop}</h3>
+                        </div>
+                        <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-1 rounded-lg">
+                          ★ {prod.rating}
+                        </span>
+                      </div>
+
+                      <div className="bg-gray-50 rounded-xl p-3 space-y-1 text-xs">
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Available Volume:</span>
+                          <span className="font-bold text-gray-900">{prod.volumeAvailable} {prod.unit}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Unit Price:</span>
+                          <span className="font-mono font-bold text-emerald-700">₦{prod.priceNGN.toLocaleString()} / {prod.unit}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Location:</span>
+                          <span className="text-gray-700">{prod.location}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1">
+                        {prod.specs.map((s, idx) => (
+                          <span key={idx} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-medium">
+                            ✓ {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setSelectedProduceForEscrow(prod)}
+                      className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all"
+                    >
+                      Lock Escrow & Purchase Produce
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: AGRI-INPUTS & IMPORT POOL */}
+          {activeTab === 'inputs' && (
+            <div className="space-y-6">
+              <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm w-full sm:w-fit">
+                <button
+                  onClick={() => setInputSubTab('importpools')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    inputSubTab === 'importpools' ? 'bg-emerald-700 text-white shadow-sm' : 'text-gray-600 hover:text-emerald-700'
+                  }`}
+                >
+                  🚢 Group Import Pooling (Machinery & Tech)
+                </button>
+                <button
+                  onClick={() => setInputSubTab('inputs')}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    inputSubTab === 'inputs' ? 'bg-emerald-700 text-white shadow-sm' : 'text-gray-600 hover:text-emerald-700'
+                  }`}
+                >
+                  🧪 Agri-Inputs & Fertilizers
+                </button>
               </div>
 
               {inputSubTab === 'importpools' && (
                 <div className="space-y-4">
-                  {selectedPoolForJoin && (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 space-y-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">Group Import Pool Escrow</span>
-                          <h3 className="text-sm font-bold text-emerald-950 mt-1">{selectedPoolForJoin.title}</h3>
-                          <p className="text-xs text-emerald-800">Origin: {selectedPoolForJoin.origin} | Unit Price: <strong className="font-mono text-emerald-950">${selectedPoolForJoin.priceUSD.toLocaleString()} USD</strong></p>
-                        </div>
-                        <button onClick={() => setSelectedPoolForJoin(null)} className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold">✕ Cancel</button>
-                      </div>
-
-                      {poolSuccessMsg ? (
-                        <div className="bg-white border border-emerald-300 p-3 rounded-lg text-center text-xs text-emerald-900 font-semibold">{poolSuccessMsg}</div>
-                      ) : (
-                        <form onSubmit={handleConfirmPoolParticipation} className="space-y-3">
-                          <div>
-                            <label className="text-xs font-medium text-emerald-900 block mb-1">Number of Units to Reserve</label>
-                            <input
-                              type="number"
-                              min="1"
-                              max={selectedPoolForJoin.targetUnits - selectedPoolForJoin.reservedUnits}
-                              value={poolUnitsToOrder}
-                              onChange={(e) => setPoolUnitsToOrder(e.target.value)}
-                              className="w-full text-sm p-2.5 border border-emerald-300 rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none bg-white text-gray-900"
-                            />
-                          </div>
-                          <div className="text-xs bg-white p-3 rounded border border-emerald-200 text-emerald-950 flex justify-between items-center">
-                            <span>Total USD Deposit Required:</span>
-                            <strong className="text-sm font-mono text-emerald-800">${(selectedPoolForJoin.priceUSD * poolUnitsToOrder).toLocaleString()} USD</strong>
-                          </div>
-                          <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-lg text-xs shadow-sm">
-                            🔒 Pay & Join Pool via BMONI Gateway
-                          </button>
-                        </form>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {importPools.map(pool => {
-                      const percent = Math.round((pool.reservedUnits / pool.targetUnits) * 100);
-                      return (
-                        <div key={pool.id} className="border border-gray-200 rounded-xl p-4 flex flex-col justify-between space-y-4 bg-white">
-                          <div className="space-y-2">
-                            <div className="flex justify-between items-start">
-                              <span className="text-[10px] bg-emerald-50 text-emerald-800 font-medium px-2 py-0.5 rounded border border-emerald-200">{pool.category}</span>
-                              <span className="text-xs font-bold text-gray-900 font-mono">${pool.priceUSD.toLocaleString()} USD</span>
-                            </div>
-                            <h3 className="text-sm font-bold text-gray-950">{pool.title}</h3>
-                            <p className="text-xs text-gray-600">{pool.description}</p>
-                            <div className="text-[11px] text-emerald-700 bg-emerald-50 p-2 rounded">{pool.groupSavings}</div>
-                            
-                            <div className="space-y-1 pt-1">
-                              <div className="flex justify-between text-xs text-gray-600">
-                                <span>Pool Progress: {pool.reservedUnits}/{pool.targetUnits} units</span>
-                                <span className="font-semibold text-emerald-800">{percent}%</span>
-                              </div>
-                              <div className="w-full bg-gray-200 h-2 rounded-full overflow-hidden">
-                                <div className="bg-emerald-600 h-full rounded-full transition-all" style={{ width: `${percent}%` }}></div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="border-t pt-3 flex justify-between items-center">
-                            <span className="text-[11px] text-gray-500">Est. Delivery: {pool.estimatedDays} days</span>
-                            <button
-                              onClick={() => handleJoinImportPool(pool)}
-                              className="bg-emerald-800 hover:bg-emerald-900 text-white font-medium px-3 py-1.5 rounded-lg text-xs"
-                            >
-                              Join Pool
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                  <div className="bg-emerald-900 text-white p-5 rounded-2xl shadow-sm">
+                    <h3 className="font-bold text-base">Co-Import High-End Farm Machinery & Green Tech</h3>
+                    <p className="text-xs text-emerald-200 mt-1">
+                      Pool orders with other cooperatives to bypass middlemen, reduce freight fees by up to 35%, and secure direct factory pricing with BMONI escrow security.
+                    </p>
                   </div>
-                </div>
-              )}
-
-              {inputSubTab === 'merchants' && (
-                <div className="space-y-4">
-                  {selectedMerchantItem && (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 space-y-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">Merchant Escrow Checkout</span>
-                          <h3 className="text-sm font-bold text-emerald-950 mt-1">{selectedMerchantItem.name}</h3>
-                          <p className="text-xs text-emerald-800">Merchant: {selectedMerchantItem.merchant} | Price: <strong className="font-mono text-emerald-950">₦{selectedMerchantItem.priceNGN.toLocaleString()} NGN</strong></p>
-                        </div>
-                        <button onClick={() => setSelectedMerchantItem(null)} className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold">✕ Cancel</button>
-                      </div>
-
-                      {merchantBuySuccessMsg ? (
-                        <div className="bg-white border border-emerald-300 p-3 rounded-lg text-center text-xs text-emerald-900 font-semibold">{merchantBuySuccessMsg}</div>
-                      ) : (
-                        <form onSubmit={handleBuyMerchantInput} className="space-y-3">
-                          <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-lg text-xs shadow-sm">
-                            🔒 Pay ₦{selectedMerchantItem.priceNGN.toLocaleString()} via BMONI Gateway
-                          </button>
-                        </form>
-                      )}
-                    </div>
-                  )}
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {MOCK_AGRI_INPUTS.map(inp => (
-                      <div key={inp.id} className="border border-gray-200 rounded-xl p-4 flex flex-col justify-between space-y-3 bg-white">
-                        <div className="space-y-2">
+                    {importPools.map(pool => (
+                      <div key={pool.id} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4 flex flex-col justify-between">
+                        <div className="space-y-3">
                           <div className="flex justify-between items-start">
-                            <span className="text-[10px] bg-gray-100 text-gray-700 font-medium px-2 py-0.5 rounded">{inp.category}</span>
-                            <span className="text-xs font-bold text-emerald-700 font-mono">₦{inp.priceNGN.toLocaleString()}</span>
+                            <span className="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-0.5 rounded">
+                              {pool.origin}
+                            </span>
+                            <span className="text-[10px] font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded">
+                              {pool.status}
+                            </span>
                           </div>
-                          <h3 className="text-sm font-bold text-gray-950">{inp.name}</h3>
-                          <p className="text-xs text-gray-600 font-medium">Merchant: <span className="text-emerald-800">{inp.merchant}</span></p>
-                          <div className="flex flex-wrap gap-1 pt-1">
-                            {inp.specs.map((s, idx) => (
-                              <span key={idx} className="text-[10px] bg-gray-50 border text-gray-600 px-1.5 py-0.5 rounded">✓ {s}</span>
-                            ))}
+
+                          <h4 className="font-bold text-sm text-gray-900">{pool.title}</h4>
+                          <p className="text-xs text-gray-600 leading-relaxed">{pool.description}</p>
+
+                          <div className="bg-gray-50 rounded-xl p-3 space-y-1 text-xs">
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Group Pool Price:</span>
+                              <span className="font-mono font-bold text-emerald-700">${pool.priceUSD.toLocaleString()} USD (₦{(pool.priceUSD * 1500).toLocaleString()})</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Retail Comparison:</span>
+                              <span className="font-mono line-through text-gray-400">${pool.retailPriceUSD.toLocaleString()} USD</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Progress:</span>
+                              <span className="font-bold text-gray-900">{pool.reservedUnits} / {pool.targetUnits} Units Locked</span>
+                            </div>
+                          </div>
+
+                          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+                            <div className="bg-emerald-600 h-full rounded-full transition-all" style={{ width: `${(pool.reservedUnits / pool.targetUnits) * 100}%` }}></div>
+                          </div>
+
+                          <div className="text-[10px] bg-emerald-50 text-emerald-800 p-2 rounded-lg font-semibold">
+                            💡 {pool.groupSavings}
                           </div>
                         </div>
 
-                        <div className="border-t pt-3 flex justify-between items-center text-xs">
-                          <span className="text-gray-500">In Stock: <strong className="text-gray-800">{inp.stock}</strong></span>
-                          <button
-                            onClick={() => setSelectedMerchantItem(inp)}
-                            className="bg-emerald-800 hover:bg-emerald-900 text-white font-medium px-3 py-1.5 rounded-lg text-xs"
-                          >
-                            Buy with Escrow
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => setSelectedPoolForJoin(pool)}
+                          className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all"
+                        >
+                          Join Import Pool & Lock Deposit ($USD)
+                        </button>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* TAB 3: HARVEST PRODUCE & ESCROW */}
-          {activeTab === 'marketplace' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-              <div className="border-b pb-4">
-                <h2 className="text-base sm:text-lg font-bold text-gray-950">🌾 Verified Harvest Produce & Smart Escrow Settlement</h2>
-                <p className="text-xs text-gray-500">Lock cNGN or USDB smart escrow for harvested agricultural produce with stage-gate verification.</p>
-              </div>
-
-              {selectedProduceForEscrow && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 space-y-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">Smart Escrow Contract Builder</span>
-                      <h3 className="text-sm font-bold text-emerald-950 mt-1">{selectedProduceForEscrow.crop}</h3>
-                      <p className="text-xs text-emerald-800">Seller: {selectedProduceForEscrow.seller} | Unit Price: <strong className="font-mono text-emerald-950">₦{selectedProduceForEscrow.priceNGN.toLocaleString()} / {selectedProduceForEscrow.unit}</strong></p>
-                    </div>
-                    <button onClick={() => setSelectedProduceForEscrow(null)} className="text-xs text-emerald-700 hover:text-emerald-900 font-semibold">✕ Cancel</button>
-                  </div>
-
-                  {escrowSuccessMsg ? (
-                    <div className="bg-white border border-emerald-300 p-3 rounded-lg text-center text-xs text-emerald-900 font-semibold">{escrowSuccessMsg}</div>
-                  ) : (
-                    <form onSubmit={handleExecuteHarvestEscrow} className="space-y-3">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs font-medium text-emerald-900 block mb-1">Quantity ({selectedProduceForEscrow.unit})</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max={selectedProduceForEscrow.volumeAvailable}
-                            value={escrowQuantity}
-                            onChange={(e) => setEscrowQuantity(e.target.value)}
-                            className="w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-emerald-500 bg-white text-gray-900"
-                          />
+              {inputSubTab === 'inputs' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {MOCK_AGRI_INPUTS.map(inp => (
+                    <div key={inp.id} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4 flex flex-col justify-between">
+                      <div className="space-y-3">
+                        <div className="flex justify-between">
+                          <span className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2 py-0.5 rounded">
+                            {inp.category}
+                          </span>
+                          <span className="text-xs bg-amber-50 text-amber-700 font-bold px-2 py-0.5 rounded">
+                            ★ {inp.rating}
+                          </span>
                         </div>
-                        <div>
-                          <label className="text-xs font-medium text-emerald-900 block mb-1">Escrow Rail</label>
-                          <select
-                            value={escrowCurrency}
-                            onChange={(e) => setEscrowCurrency(e.target.value)}
-                            className="w-full text-sm p-2 border rounded-lg focus:ring-1 focus:ring-emerald-500 bg-white text-gray-900"
-                          >
-                            <option value="cNGN">cNGN (Stablecoin)</option>
-                            <option value="USDB">USDB (Foreign USD)</option>
-                          </select>
+
+                        <h4 className="font-bold text-sm text-gray-900">{inp.name}</h4>
+                        <p className="text-xs text-gray-500 font-medium">{inp.merchant} • {inp.location}</p>
+
+                        <div className="bg-gray-50 rounded-xl p-3 space-y-1 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Price:</span>
+                            <span className="font-mono font-bold text-emerald-700">₦{inp.priceNGN.toLocaleString()}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Stock Availability:</span>
+                            <span className="font-bold text-gray-900">{inp.stock}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1">
+                          {inp.specs.map((s, i) => (
+                            <span key={i} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                              ✓ {s}
+                            </span>
+                          ))}
                         </div>
                       </div>
 
-                      <div className="text-xs bg-white p-3 rounded border border-emerald-200 text-emerald-950 flex justify-between items-center">
-                        <span>Total Escrow Lock Amount:</span>
-                        <strong className="text-sm font-mono text-emerald-800">
-                          {escrowCurrency === 'cNGN' ? `₦${(escrowQuantity * selectedProduceForEscrow.priceNGN).toLocaleString()} cNGN` : `$${Math.round((escrowQuantity * selectedProduceForEscrow.priceNGN) / 1500).toLocaleString()} USDB`}
-                        </strong>
-                      </div>
-
-                      <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-lg text-xs shadow-sm">
-                        🔒 Pay & Lock Funds in BMONI Escrow
+                      <button
+                        onClick={() => setSelectedMerchantItem(inp)}
+                        className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm"
+                      >
+                        Buy with BMONI Escrow Protection
                       </button>
-                    </form>
-                  )}
+                    </div>
+                  ))}
                 </div>
               )}
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {INITIAL_HARVEST_PRODUCE.map(item => (
-                  <div key={item.id} className="border border-gray-200 rounded-xl p-4 flex flex-col justify-between space-y-3 bg-white">
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-start">
-                        <span className="text-[10px] bg-emerald-50 text-emerald-800 font-medium px-2 py-0.5 rounded border border-emerald-200">Available: {item.volumeAvailable} {item.unit}</span>
-                        <span className="text-xs font-bold text-emerald-700 font-mono">₦{item.priceNGN.toLocaleString()} / {item.unit}</span>
-                      </div>
-                      <h3 className="text-sm font-bold text-gray-950">{item.crop}</h3>
-                      <p className="text-xs text-gray-600">Farmer Co-op: <span className="font-medium text-emerald-900">{item.seller}</span></p>
-                      <p className="text-xs text-gray-500">📍 {item.location}</p>
-                      <div className="flex flex-wrap gap-1 pt-1">
-                        {item.specs.map((s, idx) => (
-                          <span key={idx} className="text-[10px] bg-gray-50 border text-gray-600 px-1.5 py-0.5 rounded">✓ {s}</span>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="border-t pt-3 flex justify-between items-center text-xs">
-                      <span className="text-emerald-700 font-semibold">★ {item.rating} Verified</span>
-                      <button
-                        onClick={() => setSelectedProduceForEscrow(item)}
-                        className="bg-emerald-800 hover:bg-emerald-900 text-white font-medium px-3 py-1.5 rounded-lg text-xs"
-                      >
-                        Create Escrow Contract
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
 
-          {/* TAB 4: ACTIVE ESCROW CONTRACTS LEDGER */}
+          {/* TAB 4: SMART ESCROW LEDGER */}
           {activeTab === 'escrowledger' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-              <div className="border-b pb-4">
-                <h2 className="text-base sm:text-lg font-bold text-gray-950">🛡️ Active Escrow Contracts Ledger</h2>
-                <p className="text-xs text-gray-500">Track stage-gate releases, quality inspections, and milestone disbursement for all active commodity contracts.</p>
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm">
+                <h2 className="text-lg font-bold text-gray-900">Active Escrow Contracts & Milestone Ledger</h2>
+                <p className="text-xs text-gray-500 mt-1">
+                  Track multi-currency smart escrow contracts, quality inspection states, and release funds upon successful delivery.
+                </p>
               </div>
 
               <div className="space-y-4">
                 {activeEscrowContracts.map(contract => (
-                  <div key={contract.id} className="border border-gray-200 rounded-xl p-5 space-y-4 bg-white shadow-sm">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b pb-3">
+                  <div key={contract.id} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-gray-100 pb-3">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-mono font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">{contract.id}</span>
-                          <span className="text-[10px] bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded">{contract.status}</span>
-                        </div>
-                        <h3 className="text-sm font-bold text-gray-950 mt-1">{contract.crop} ({contract.quantity})</h3>
+                        <span className="font-mono text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md">
+                          {contract.id}
+                        </span>
+                        <h3 className="font-bold text-sm text-gray-900 mt-1">{contract.crop}</h3>
                       </div>
-                      <div className="text-right">
-                        <span className="text-xs text-gray-500 block">Total Value:</span>
-                        <strong className="text-sm font-mono text-emerald-900">{contract.currency} {contract.totalAmount.toLocaleString()}</strong>
+                      <span className={`text-xs font-bold px-3 py-1 rounded-xl ${
+                        contract.status === 'FUNDS_RELEASED_TO_SELLER'
+                          ? 'bg-blue-50 text-blue-700'
+                          : 'bg-emerald-100 text-emerald-800 animate-pulse'
+                      }`}>
+                        {contract.status}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs bg-gray-50 p-3 rounded-xl">
+                      <div>
+                        <span className="text-gray-500 block text-[10px]">Seller / Supplier</span>
+                        <span className="font-semibold text-gray-900 truncate block">{contract.seller}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block text-[10px]">Buyer / Offtaker</span>
+                        <span className="font-semibold text-gray-900 truncate block">{contract.buyer}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block text-[10px]">Quantity</span>
+                        <span className="font-semibold text-gray-900">{contract.quantity}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500 block text-[10px]">Escrow Value</span>
+                        <span className="font-mono font-bold text-emerald-700">{contract.currency} {contract.totalAmount.toLocaleString()}</span>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-gray-600 bg-gray-50 p-3 rounded-lg">
-                      <div><strong className="text-gray-800 block">Seller:</strong> {contract.seller}</div>
-                      <div><strong className="text-gray-800 block">Buyer:</strong> {contract.buyer}</div>
-                      <div><strong className="text-gray-800 block">Quality Spec:</strong> {contract.qualitySpecs}</div>
-                    </div>
-
-                    {/* Stage Tracker */}
+                    {/* Milestone Progress Bar */}
                     <div className="space-y-2">
-                      <div className="flex justify-between text-xs font-medium text-gray-600">
-                        <span>Stage 1: Contract Initialized</span>
-                        <span>Stage 2: Funds Locked</span>
-                        <span>Stage 3: In Transit</span>
-                        <span>Stage 4: Released</span>
+                      <div className="flex justify-between text-[11px] font-semibold text-gray-600">
+                        <span className={contract.stage >= 1 ? 'text-emerald-700' : ''}>1. Contract Drafted</span>
+                        <span className={contract.stage >= 2 ? 'text-emerald-700' : ''}>2. Funds Locked</span>
+                        <span className={contract.stage >= 3 ? 'text-emerald-700' : ''}>3. Quality Inspection</span>
+                        <span className={contract.stage >= 4 ? 'text-blue-700 font-bold' : ''}>4. Settlement Released</span>
                       </div>
-                      <div className="w-full bg-gray-200 h-2 rounded-full overflow-hidden flex">
-                        <div className={`h-full transition-all ${contract.stage >= 1 ? 'bg-emerald-600' : 'bg-gray-300'}`} style={{ width: '25%' }}></div>
-                        <div className={`h-full transition-all ${contract.stage >= 2 ? 'bg-emerald-600' : 'bg-gray-300'}`} style={{ width: '25%' }}></div>
-                        <div className={`h-full transition-all ${contract.stage >= 3 ? 'bg-emerald-600' : 'bg-gray-300'}`} style={{ width: '25%' }}></div>
-                        <div className={`h-full transition-all ${contract.stage >= 4 ? 'bg-emerald-600' : 'bg-gray-300'}`} style={{ width: '25%' }}></div>
+                      <div className="w-full bg-gray-200 h-2 rounded-full overflow-hidden">
+                        <div className="bg-emerald-600 h-full transition-all" style={{ width: `${(contract.stage / 4) * 100}%` }}></div>
                       </div>
                     </div>
 
-                    <div className="flex justify-between items-center pt-2 border-t">
-                      <span className="text-xs text-gray-500">Date: {contract.date}</span>
-                      {contract.stage < 4 ? (
+                    {contract.status !== 'FUNDS_RELEASED_TO_SELLER' && (
+                      <div className="flex justify-end gap-3 pt-2">
                         <button
                           onClick={() => handleReleaseEscrowFunds(contract.id)}
-                          className="bg-emerald-700 hover:bg-emerald-800 text-white font-medium px-3 py-1.5 rounded-lg text-xs"
+                          className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-sm transition-all"
                         >
-                          Verify Inspection & Release Funds
+                          ✓ Verify Quality & Release Escrow Funds to Seller
                         </button>
-                      ) : (
-                        <span className="text-xs text-emerald-700 font-bold">✓ Funds Fully Settled to Seller</span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* TAB 5: AI ASSISTANT */}
-          {activeTab === 'aiassistant' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 flex flex-col h-[600px]">
-              <div className="border-b pb-4 flex justify-between items-center">
+          {/* TAB 5: NIBSS BVN & ONBOARDING */}
+          {activeTab === 'sandboxkyc' && (
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
                 <div>
-                  <h2 className="text-base sm:text-lg font-bold text-gray-950">🤖 BMONI Embedded AI Agritech Assistant</h2>
-                  <p className="text-xs text-gray-500">Ask questions about NIBSS BVN verification, smart escrow rails, and factory off-take contracts.</p>
+                  <span className="bg-emerald-50 text-emerald-800 text-[10px] font-bold px-2.5 py-1 rounded uppercase tracking-wider">
+                    NIBSS Verification Layer
+                  </span>
+                  <h2 className="text-lg font-bold text-gray-900 mt-2">Instant 11-Digit BVN & Tiered KYC Onboarding</h2>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Test live NIBSS BVN verification using test profiles or enter any 11-digit BVN to validate identity.
+                  </p>
+                </div>
+
+                {/* Test BVN Quick Buttons */}
+                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-100 space-y-2">
+                  <span className="text-xs font-bold text-emerald-900 block">Quick Test BVNs (NIBSS Sandbox Mocks):</span>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { name: 'Bunch Dillon (Farmer)', bvn: '95888168924' },
+                      { name: 'Samson Jabo (Coop Lead)', bvn: '22222222222' },
+                      { name: 'Amina Abubakar (Aggregator)', bvn: '33333333333' }
+                    ].map(test => (
+                      <button
+                        key={test.bvn}
+                        onClick={() => {
+                          setKycProfile(prev => ({ ...prev, bvn: test.bvn, firstName: test.name.split(' ')[0], lastName: test.name.split(' ')[1] }));
+                          handlePerformBvnLookup(test.bvn);
+                        }}
+                        className="bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all"
+                      >
+                        ⚡ Test {test.name} ({test.bvn})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4 pt-2">
+                  <div className="border-t border-gray-200 pt-4 space-y-3">
+                    <label className="block text-xs font-semibold text-gray-700">Enter 11-Digit BVN for NIBSS Verification</label>
+                    <div className="flex gap-3">
+                      <input
+                        type="text"
+                        maxLength={11}
+                        value={kycProfile.bvn}
+                        onChange={(e) => setKycProfile(prev => ({ ...prev, bvn: e.target.value }))}
+                        className="flex-1 px-3 py-2 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl font-mono"
+                        placeholder="e.g. 95888168924"
+                      />
+                      <button
+                        onClick={() => handlePerformBvnLookup()}
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2 rounded-xl text-xs shadow-sm"
+                      >
+                        Verify BVN
+                      </button>
+                    </div>
+
+                    {kycProfile.bvnResult && (
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2 text-xs">
+                        <div className="flex justify-between items-center font-bold text-emerald-900 border-b border-emerald-200 pb-1">
+                          <span>NIBSS Verification Successful</span>
+                          <span className="bg-emerald-600 text-white px-2 py-0.5 rounded text-[10px]">
+                            Confidence: {kycProfile.bvnResult.confidenceScore}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-gray-700">
+                          <div><span className="text-gray-500">Full Name:</span> {kycProfile.bvnResult.firstName} {kycProfile.bvnResult.lastName}</div>
+                          <div><span className="text-gray-500">DOB:</span> {kycProfile.bvnResult.dateOfBirth}</div>
+                          <div><span className="text-gray-500">Phone:</span> {kycProfile.bvnResult.phone}</div>
+                          <div><span className="text-gray-500">NIN:</span> {kycProfile.bvnResult.nin}</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-
-              <div className="flex-1 overflow-y-auto space-y-4 my-4 pr-2">
-                {aiChatHistory.map((chat, idx) => (
-                  <div key={idx} className={`flex ${chat.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs sm:text-sm ${chat.role === 'user' ? 'bg-emerald-600 text-white rounded-br-none' : 'bg-gray-100 text-gray-900 rounded-bl-none border border-gray-200'}`}>
-                      {chat.text}
-                    </div>
-                  </div>
-                ))}
-                {aiLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-gray-100 text-gray-500 rounded-2xl px-4 py-3 text-xs animate-pulse">
-                      Analyzing BMONI SDK documentation...
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex flex-wrap gap-2 mb-3">
-                {[
-                  "How does cNGN escrow locking work?",
-                  "Explain NIBSS BVN verification integration",
-                  "How do I join Group Import Pools?",
-                  "What is the fee for factory off-take?"
-                ].map((prompt, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setAiQuery(prompt)}
-                    className="text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-full transition-colors"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-
-              <form onSubmit={handleAiAsk} className="flex gap-2 pt-2 border-t">
-                <input
-                  type="text"
-                  placeholder="Type question about BMONI API..."
-                  value={aiQuery}
-                  onChange={(e) => setAiQuery(e.target.value)}
-                  className="flex-1 text-xs p-2.5 border rounded-lg focus:ring-1 focus:ring-emerald-500 focus:outline-none bg-white text-gray-900 placeholder-gray-400"
-                />
-                <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-lg text-xs font-semibold">
-                  Send
-                </button>
-              </form>
             </div>
           )}
 
-          {/* TAB 6: ONBOARDING & BVN SANDBOX */}
-          {activeTab === 'personas' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-              <div className="border-b pb-4">
-                <h2 className="text-base sm:text-lg font-bold text-gray-950">👥 Onboarding & NIBSS BVN Verification Sandbox</h2>
-                <p className="text-xs text-gray-500">Test live KYC persona creation and instant 11-digit NIBSS BVN verification using BmoniServiceAdapter.</p>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className={`border rounded-xl p-4 space-y-3 ${kycProfile.step === 1 ? 'border-emerald-600 bg-emerald-50/50' : 'border-gray-200 bg-white'}`}>
-                  <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">Step 1</span>
-                  <h3 className="text-sm font-bold text-gray-950">Initialize User</h3>
-                  <div className="space-y-2 text-xs">
-                    <input type="text" value={kycProfile.firstName} onChange={(e) => setKycProfile({...kycProfile, firstName: e.target.value})} placeholder="First Name" className="w-full text-xs p-2 border rounded bg-white text-gray-900 placeholder-gray-400" />
-                    <input type="text" value={kycProfile.lastName} onChange={(e) => setKycProfile({...kycProfile, lastName: e.target.value})} placeholder="Last Name" className="w-full text-xs p-2 border rounded bg-white text-gray-900 placeholder-gray-400" />
-                    <input type="email" value={kycProfile.email} onChange={(e) => setKycProfile({...kycProfile, email: e.target.value})} placeholder="Email" className="w-full text-xs p-2 border rounded bg-white text-gray-900 placeholder-gray-400" />
-                    <button onClick={handleCreateUserSandbox} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded font-semibold">
-                      Create BMONI User
-                    </button>
+          {/* TAB 6: MINTLIFY & AI ASSISTANT */}
+          {activeTab === 'docs' && (
+            <div className="space-y-6">
+              {/* AI Assistant Card */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4">
+                <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+                  <div>
+                    <span className="text-[10px] font-bold bg-purple-50 text-purple-700 px-2.5 py-1 rounded uppercase tracking-wider">
+                      Embedded AI Assistant
+                    </span>
+                    <h3 className="font-bold text-base text-gray-900 mt-1">Ask AGRO JET Developer AI</h3>
                   </div>
+                  <span className="text-xs bg-emerald-50 text-emerald-700 font-semibold px-2 py-1 rounded">
+                    ⚡ Connected to BMONI API
+                  </span>
                 </div>
 
-                <div className={`border rounded-xl p-4 space-y-3 ${kycProfile.step === 2 ? 'border-emerald-600 bg-emerald-50/50' : 'border-gray-200 bg-white'}`}>
-                  <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">Step 2</span>
-                  <h3 className="text-sm font-bold text-gray-950">NIBSS BVN Lookup</h3>
-                  <div className="space-y-2 text-xs">
-                    <p className="text-gray-500">Test BVN: <strong className="text-emerald-800">95888168924</strong></p>
-                    <input type="text" maxLength="11" value={kycProfile.bvn} onChange={(e) => setKycProfile({...kycProfile, bvn: e.target.value})} placeholder="11-digit BVN" className="w-full text-xs p-2 border rounded bg-white text-gray-900 placeholder-gray-400 font-mono" />
-                    <button onClick={() => handlePerformBvnLookup()} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded font-semibold">
-                      Verify BVN
-                    </button>
-                  </div>
-                </div>
-
-                <div className={`border rounded-xl p-4 space-y-3 ${kycProfile.step === 3 ? 'border-emerald-600 bg-emerald-50/50' : 'border-gray-200 bg-white'}`}>
-                  <span className="text-[10px] font-bold bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded">Step 3</span>
-                  <h3 className="text-sm font-bold text-gray-950">Verification Status</h3>
-                  {kycProfile.bvnResult ? (
-                    <div className="space-y-1 text-xs bg-white p-3 rounded border text-gray-800">
-                      <div><strong className="text-emerald-800">Name:</strong> {kycProfile.bvnResult.firstName} {kycProfile.bvnResult.lastName}</div>
-                      <div><strong className="text-emerald-800">Status:</strong> {kycProfile.bvnResult.verificationStatus}</div>
-                      <div><strong className="text-emerald-800">Confidence:</strong> {kycProfile.bvnResult.confidenceScore}</div>
-                      <div><strong className="text-emerald-800">NIN:</strong> {kycProfile.bvnResult.nin}</div>
+                <div className="space-y-3 max-h-72 overflow-y-auto p-3 bg-gray-50 rounded-xl border border-gray-100">
+                  {aiChatHistory.map((msg, idx) => (
+                    <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'bg-emerald-700 text-white rounded-br-none'
+                          : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none shadow-sm'
+                      }`}>
+                        {msg.text}
+                      </div>
                     </div>
-                  ) : (
-                    <p className="text-xs text-gray-400 italic">Awaiting BVN lookup verification...</p>
+                  ))}
+                  {aiLoading && (
+                    <div className="flex justify-start">
+                      <div className="bg-white text-gray-500 border border-gray-200 rounded-2xl p-3 text-xs animate-pulse">
+                        Thinking...
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* TAB 7: MINTLIFY INDEX */}
-          {activeTab === 'docsindex' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
-              <div className="border-b pb-4 flex justify-between items-center">
-                <div>
-                  <h2 className="text-base sm:text-lg font-bold text-gray-950">📖 Mintlify llms.txt Documentation Index</h2>
-                  <p className="text-xs text-gray-500">Live synchronized OpenAPI endpoints and SDK documentation index.</p>
+                <form onSubmit={handleAiAsk} className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Ask about escrow contracts, BVN validation, or BMONI payment API..."
+                    value={aiQuery}
+                    onChange={(e) => setAiQuery(e.target.value)}
+                    className="flex-1 px-3.5 py-2.5 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="submit"
+                    disabled={aiLoading}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-sm transition-all"
+                  >
+                    Ask AI
+                  </button>
+                </form>
+              </div>
+
+              {/* Mintlify LLMs.txt Raw Index */}
+              <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-3">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold text-sm text-gray-900">Documentation Index (llms.txt)</h3>
+                  <button
+                    onClick={() => copyToClipboard(docContent, 'Documentation index copied')}
+                    className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-lg transition-all"
+                  >
+                    Copy llms.txt
+                  </button>
                 </div>
-                <button
-                  onClick={() => copyToClipboard(docContent, 'Docs')}
-                  className="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs px-3 py-1.5 rounded-lg border font-medium"
-                >
-                  {copiedNotification === 'Docs' ? '✓ Copied llms.txt' : 'Copy Index'}
-                </button>
+                <pre className="bg-gray-900 text-emerald-400 p-4 rounded-xl text-xs font-mono overflow-x-auto max-h-60 leading-relaxed">
+                  {docContent || 'Loading documentation...'}
+                </pre>
               </div>
-
-              <div className="bg-gray-900 text-emerald-400 font-mono text-xs p-4 rounded-xl overflow-x-auto max-h-[500px]">
-                <pre>{docContent}</pre>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 8: API & PAYMENT GATEWAY TERMINAL */}
-          {activeTab === 'aiconfig' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
-              <div className="border-b pb-4">
-                <h2 className="text-base sm:text-lg font-bold text-gray-950">⚙️ BMONI API & Payment Gateway Terminal</h2>
-                <p className="text-xs text-gray-500">Test payment gateway initialization, escrow contracts, and inspect live sandbox adapter logs.</p>
-              </div>
-
-              <form onSubmit={handleRunTerminalTest} className="bg-gray-50 border p-5 rounded-xl space-y-4">
-                <h3 className="text-sm font-bold text-gray-900">Test Payment Gateway Session</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Amount</label>
-                    <input
-                      type="number"
-                      value={testAmount}
-                      onChange={(e) => setTestAmount(e.target.value)}
-                      className="w-full text-xs p-2.5 border rounded-lg bg-white text-gray-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700 block mb-1">Currency / Rail</label>
-                    <select
-                      value={testChannel}
-                      onChange={(e) => setTestChannel(e.target.value)}
-                      className="w-full text-xs p-2.5 border rounded-lg bg-white text-gray-900"
-                    >
-                      <option value="cNGN">cNGN Stablecoin</option>
-                      <option value="NGN">NGN Bank Transfer</option>
-                      <option value="USDB">USDB Foreign Currency</option>
-                    </select>
-                  </div>
-                </div>
-                <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow-sm">
-                  Initialize BMONI Checkout Session
-                </button>
-
-                {terminalResult && (
-                  <div className="bg-white border p-3 rounded-lg text-xs font-mono text-gray-800 space-y-1">
-                    <div><strong className="text-emerald-700">Ref:</strong> {terminalResult.txRef}</div>
-                    <div><strong className="text-emerald-700">Checkout URL:</strong> {terminalResult.checkoutUrl}</div>
-                    <div><strong className="text-emerald-700">Virtual Account:</strong> {terminalResult.accountNumber} ({terminalResult.bankName})</div>
-                  </div>
-                )}
-              </form>
             </div>
           )}
 
         </div>
 
-        {/* Right Sidebar: Live Console Logs Stream */}
-        <div className="bg-slate-900 text-slate-100 rounded-xl p-4 flex flex-col h-[650px] shadow-sm font-mono text-xs">
-          <div className="flex justify-between items-center border-b border-slate-800 pb-3 mb-3">
-            <span className="font-bold flex items-center gap-2 text-emerald-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-              BMONI Live Console Stream
-            </span>
-            <button
-              onClick={() => setConsoleLogs([])}
-              className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded"
-            >
-              Clear
-            </button>
+        {/* Right Column: Live API Console & Sandbox Terminal */}
+        <div className="space-y-6">
+          
+          {/* API Test Sandbox Terminal */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-4">
+            <h3 className="font-bold text-sm text-gray-900 flex items-center gap-2">
+              <span>⚡</span> BMONI API Test Terminal
+            </h3>
+            <p className="text-xs text-gray-500">
+              Directly invoke <code className="bg-gray-100 px-1 rounded font-mono text-emerald-700">initializePayment()</code> or <code className="bg-gray-100 px-1 rounded font-mono text-emerald-700">createEscrow()</code> with custom payloads.
+            </p>
+
+            <form onSubmit={handleRunTerminalTest} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Test Amount</label>
+                <input
+                  type="number"
+                  value={testAmount}
+                  onChange={(e) => setTestAmount(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Payment Rail / Currency</label>
+                <select
+                  value={testChannel}
+                  onChange={(e) => setTestChannel(e.target.value)}
+                  className="w-full px-3 py-2 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl"
+                >
+                  <option value="cNGN">cNGN (Stablecoin)</option>
+                  <option value="NGN">NGN Fiat Bank Transfer</option>
+                  <option value="USDB">USDB (USD Stable)</option>
+                </select>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-xl text-xs shadow-sm transition-all"
+              >
+                Execute API Test Checkout
+              </button>
+            </form>
+
+            {terminalResult && (
+              <div className="bg-gray-900 text-emerald-400 p-3 rounded-xl text-[11px] font-mono space-y-1 overflow-x-auto">
+                <div>status: "{terminalResult.status}"</div>
+                <div>txRef: "{terminalResult.txRef}"</div>
+                <div>accountNumber: "{terminalResult.accountNumber}"</div>
+                <div>bankName: "{terminalResult.bankName}"</div>
+              </div>
+            )}
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1 scrollbar-thin">
-            {consoleLogs.map((log) => (
-              <div key={log.id} className="border-b border-slate-800/60 pb-2 space-y-1">
-                <div className="flex justify-between text-[10px] text-slate-400">
-                  <span className={`font-semibold ${log.type === 'SUCCESS' ? 'text-emerald-400' : log.type === 'WARN' ? 'text-amber-400' : 'text-blue-400'}`}>
-                    [{log.type}]
-                  </span>
-                  <span>{log.time}</span>
+          {/* Live Console Logs Stream */}
+          <div className="bg-gray-900 rounded-2xl p-5 text-gray-300 space-y-3 shadow-md">
+            <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+              <span className="text-xs font-bold font-mono tracking-wider text-emerald-400 uppercase">
+                Live Console & API Stream
+              </span>
+              <button
+                onClick={() => setConsoleLogs([])}
+                className="text-[10px] text-gray-400 hover:text-white"
+              >
+                Clear
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-80 overflow-y-auto text-[11px] font-mono">
+              {consoleLogs.map(log => (
+                <div key={log.id} className="border-b border-gray-800/50 pb-1.5 space-y-0.5">
+                  <div className="flex justify-between text-[10px] text-gray-500">
+                    <span className={log.type === 'SUCCESS' ? 'text-emerald-400 font-bold' : log.type === 'WARN' ? 'text-amber-400' : 'text-blue-400'}>
+                      [{log.type}]
+                    </span>
+                    <span>{log.time}</span>
+                  </div>
+                  <p className="text-gray-300 leading-tight">{log.message}</p>
                 </div>
-                <p className="text-slate-200 text-[11px] leading-relaxed break-words">{log.message}</p>
-              </div>
-            ))}
-            <div ref={logsEndRef} />
+              ))}
+              <div ref={logsEndRef}></div>
+            </div>
           </div>
+
         </div>
 
       </main>
 
-      {/* BMONI UNIFIED PAYMENT GATEWAY MODAL */}
+      {/* BMONI Unified Payment Gateway Modal */}
       {paymentModalOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-6 animate-in fade-in zoom-in duration-200">
-            <div className="flex justify-between items-start border-b pb-4">
-              <div className="flex items-center gap-2">
-                <div className="bg-emerald-600 text-white font-bold p-2 rounded-lg text-xs">BMONI</div>
-                <div>
-                  <h3 className="text-base font-bold text-gray-950">Secure Payment Gateway</h3>
-                  <p className="text-xs text-gray-500">Powered by BmoniServiceAdapter</p>
-                </div>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+              <div>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded uppercase">
+                  AGRO JET Secure Checkout
+                </span>
+                <h3 className="font-bold text-lg text-gray-900 mt-1">BMONI Payment API Integration</h3>
               </div>
               <button
                 onClick={() => setPaymentModalOpen(false)}
-                className="text-gray-400 hover:text-gray-600 font-bold text-sm"
+                className="text-gray-400 hover:text-gray-700 text-sm font-bold bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center"
               >
                 ✕
               </button>
@@ -1566,71 +1683,303 @@ export default function App() {
             {paymentLoading ? (
               <div className="py-12 text-center space-y-3">
                 <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
-                <p className="text-xs text-gray-600">Initializing BMONI checkout session...</p>
+                <p className="text-xs text-gray-500 font-medium">Initializing secure BMONI settlement channel...</p>
               </div>
             ) : paymentInitData ? (
               <div className="space-y-4">
-                <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-center space-y-1">
-                  <span className="text-xs text-emerald-800 uppercase tracking-wider font-bold">Total Amount Due</span>
-                  <div className="text-2xl font-black font-mono text-emerald-950">
-                    {paymentInitData.currency} {paymentInitData.amount.toLocaleString()}
+                <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 space-y-2 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Reference:</span>
+                    <span className="font-mono font-bold text-emerald-900">{paymentInitData.txRef}</span>
                   </div>
-                  <span className="text-[10px] text-emerald-700 block font-mono">Ref: {paymentInitData.txRef}</span>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Settlement Bank:</span>
+                    <span className="font-semibold text-gray-900">{paymentInitData.bankName}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Virtual Account:</span>
+                    <span className="font-mono font-bold text-emerald-800 text-sm">{paymentInitData.accountNumber}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-emerald-200 pt-2 font-bold text-sm">
+                    <span>Total Amount:</span>
+                    <span className="font-mono text-emerald-900">{paymentInitData.currency} {paymentInitData.amount.toLocaleString()}</span>
+                  </div>
                 </div>
 
-                {/* Payment Rail Selector */}
                 <div className="space-y-2">
-                  <label className="text-xs font-bold text-gray-700 block">Select Payment Rail</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-xs font-bold text-gray-700">Select Funding Rail / Wallet</label>
+                  <div className="grid grid-cols-3 gap-2">
                     {[
-                      { id: 'cngn', label: '🪙 cNGN Stablecoin', desc: 'Instant blockchain' },
-                      { id: 'bank_transfer', label: '🏦 Bank Transfer', desc: 'NIBSS Virtual Acc' },
-                      { id: 'usdb', label: '💵 USDB Foreign', desc: 'USD Dollar Rail' },
-                      { id: 'card', label: '💳 Debit / Credit Card', desc: 'Visa / Mastercard' }
+                      { id: 'cngn', label: 'cNGN Stable' },
+                      { id: 'usdb', label: 'USDB (USD)' },
+                      { id: 'bank', label: 'NGN Fiat Bank' }
                     ].map(rail => (
                       <button
                         key={rail.id}
                         type="button"
                         onClick={() => setPaymentRail(rail.id)}
-                        className={`p-3 rounded-xl border text-left transition-all ${paymentRail === rail.id ? 'border-emerald-600 bg-emerald-50/70 ring-1 ring-emerald-500' : 'border-gray-200 hover:border-gray-300'}`}
+                        className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
+                          paymentRail === rail.id
+                            ? 'bg-emerald-700 text-white border-emerald-700 shadow-sm'
+                            : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                        }`}
                       >
-                        <div className="text-xs font-bold text-gray-900">{rail.label}</div>
-                        <div className="text-[10px] text-gray-500">{rail.desc}</div>
+                        {rail.label}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                {paymentRail === 'bank_transfer' && (
-                  <div className="bg-gray-50 border p-3 rounded-xl space-y-2 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Bank Name:</span>
-                      <strong className="text-gray-900">{paymentInitData.bankName}</strong>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-500">Account Number:</span>
-                      <div className="flex items-center gap-2">
-                        <strong className="font-mono text-emerald-800">{paymentInitData.accountNumber}</strong>
-                        <button
-                          onClick={() => copyToClipboard(paymentInitData.accountNumber, 'Account')}
-                          className="text-[10px] bg-white border px-2 py-0.5 rounded text-gray-700 font-semibold"
-                        >
-                          {copiedNotification === 'Account' ? '✓ Copied' : 'Copy'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 <button
-                  type="button"
                   onClick={handleConfirmBmoniPayment}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-md transition-colors"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 rounded-2xl text-xs shadow-md transition-all flex items-center justify-center gap-2"
                 >
-                  Confirm & Authorize Payment
+                  <span>Authorize & Complete Payment ({paymentInitData.currency} {paymentInitData.amount.toLocaleString()})</span>
                 </button>
               </div>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Corporate Offtake Proposal Modal */}
+      {selectedBuyerForProposal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+              <div>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded uppercase">
+                  Offtake Contract Binding
+                </span>
+                <h3 className="font-bold text-lg text-gray-900 mt-1">{selectedBuyerForProposal.companyName}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedBuyerForProposal(null)}
+                className="text-gray-400 hover:text-gray-700 text-sm font-bold bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            {proposalSubmittedSuccess ? (
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-center space-y-2">
+                <span className="text-emerald-700 font-bold text-sm block">✓ Proposal Bound in Escrow!</span>
+                <p className="text-xs text-gray-600">{proposalSubmittedSuccess}</p>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitSupplyProposal} className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-2xl space-y-1 text-xs">
+                  <div className="flex justify-between"><span className="text-gray-500">Raw Material:</span> <span className="font-semibold">{selectedBuyerForProposal.rawMaterialNeeded}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Agreed Offtake Price:</span> <span className="font-mono font-bold text-emerald-700">{selectedBuyerForProposal.offerPrice}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Location:</span> <span className="text-gray-700">{selectedBuyerForProposal.location}</span></div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Enter Your Supply Tonnage Offer (Metric Tons - MT)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 50"
+                    value={farmerTonnageOffer}
+                    onChange={(e) => setFarmerTonnageOffer(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl font-mono"
+                    required
+                  />
+                  {farmerTonnageOffer && !isNaN(parseFloat(farmerTonnageOffer)) && (
+                    <p className="text-[11px] text-emerald-700 font-semibold mt-1.5">
+                      Total Contract Value: ₦{(parseFloat(farmerTonnageOffer) * selectedBuyerForProposal.unitPriceNumeric).toLocaleString()} cNGN
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 rounded-2xl text-xs shadow-md transition-all"
+                >
+                  Submit Supply Proposal & Lock BMONI Escrow Deposit
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Harvest Produce Escrow Modal */}
+      {selectedProduceForEscrow && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+            <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+              <div>
+                <span className="text-[10px] bg-teal-100 text-teal-800 font-bold px-2.5 py-1 rounded uppercase">
+                  Harvest Escrow Contract
+                </span>
+                <h3 className="font-bold text-lg text-gray-900 mt-1">{selectedProduceForEscrow.crop}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedProduceForEscrow(null)}
+                className="text-gray-400 hover:text-gray-700 text-sm font-bold bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            {escrowSuccessMsg ? (
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-center space-y-2">
+                <span className="text-emerald-700 font-bold text-sm block">✓ Escrow Successfully Locked!</span>
+                <p className="text-xs text-gray-600">{escrowSuccessMsg}</p>
+              </div>
+            ) : (
+              <form onSubmit={handleExecuteHarvestEscrow} className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-2xl space-y-1 text-xs">
+                  <div className="flex justify-between"><span className="text-gray-500">Seller Cooperative:</span> <span className="font-semibold">{selectedProduceForEscrow.seller}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Unit Price:</span> <span className="font-mono font-bold text-emerald-700">₦{selectedProduceForEscrow.priceNGN.toLocaleString()} / {selectedProduceForEscrow.unit}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Location:</span> <span className="text-gray-700">{selectedProduceForEscrow.location}</span></div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Quantity ({selectedProduceForEscrow.unit})</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={escrowQuantity}
+                      onChange={(e) => setEscrowQuantity(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl font-mono"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-700 mb-1">Escrow Currency</label>
+                    <select
+                      value={escrowCurrency}
+                      onChange={(e) => setEscrowCurrency(e.target.value)}
+                      className="w-full px-3 py-2 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl"
+                    >
+                      <option value="cNGN">cNGN (Stablecoin)</option>
+                      <option value="USDB">USDB (USD Stable)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="bg-emerald-50 p-3 rounded-xl text-xs flex justify-between font-bold text-emerald-900">
+                  <span>Total Escrow Lock:</span>
+                  <span className="font-mono">
+                    {escrowCurrency} {escrowCurrency === 'USDB' ? Math.round((escrowQuantity * selectedProduceForEscrow.priceNGN) / 1500).toLocaleString() : (escrowQuantity * selectedProduceForEscrow.priceNGN).toLocaleString()}
+                  </span>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 rounded-2xl text-xs shadow-md transition-all"
+                >
+                  Lock Funds into Smart Escrow Contract
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Group Import Pool Modal */}
+      {selectedPoolForJoin && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5">
+            <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+              <div>
+                <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded uppercase">
+                  Co-Import Pooling
+                </span>
+                <h3 className="font-bold text-lg text-gray-900 mt-1">{selectedPoolForJoin.title}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedPoolForJoin(null)}
+                className="text-gray-400 hover:text-gray-700 text-sm font-bold bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            {poolSuccessMsg ? (
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-center space-y-2">
+                <span className="text-emerald-700 font-bold text-sm block">✓ Joined Import Pool!</span>
+                <p className="text-xs text-gray-600">{poolSuccessMsg}</p>
+              </div>
+            ) : (
+              <form onSubmit={handleConfirmPoolParticipation} className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-2xl space-y-1 text-xs">
+                  <div className="flex justify-between"><span className="text-gray-500">Origin / Manufacturer:</span> <span className="font-semibold">{selectedPoolForJoin.origin}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Pool Unit Price:</span> <span className="font-mono font-bold text-emerald-700">${selectedPoolForJoin.priceUSD.toLocaleString()} USD</span></div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">Number of Units to Reserve</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={selectedPoolForJoin.targetUnits - selectedPoolForJoin.reservedUnits}
+                    value={poolUnitsToOrder}
+                    onChange={(e) => setPoolUnitsToOrder(e.target.value)}
+                    className="w-full px-3 py-2 text-xs bg-white text-gray-900 border border-gray-300 rounded-xl font-mono"
+                    required
+                  />
+                </div>
+
+                <div className="bg-emerald-50 p-3 rounded-xl text-xs flex justify-between font-bold text-emerald-900">
+                  <span>Total Deposit Lock:</span>
+                  <span className="font-mono">${(selectedPoolForJoin.priceUSD * poolUnitsToOrder).toLocaleString()} USD</span>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 rounded-2xl text-xs shadow-md transition-all"
+                >
+                  Confirm & Lock Deposit in Group Import Escrow
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Merchant Agri-Input Buy Modal */}
+      {selectedMerchantItem && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-5">
+            <div className="flex justify-between items-start border-b border-gray-100 pb-4">
+              <div>
+                <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded uppercase">
+                  Agri-Input Escrow
+                </span>
+                <h3 className="font-bold text-lg text-gray-900 mt-1">{selectedMerchantItem.name}</h3>
+              </div>
+              <button
+                onClick={() => setSelectedMerchantItem(null)}
+                className="text-gray-400 hover:text-gray-700 text-sm font-bold bg-gray-100 w-8 h-8 rounded-full flex items-center justify-center"
+              >
+                ✕
+              </button>
+            </div>
+
+            {merchantBuySuccessMsg ? (
+              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl text-center space-y-2">
+                <span className="text-emerald-700 font-bold text-sm block">✓ Order Confirmed!</span>
+                <p className="text-xs text-gray-600">{merchantBuySuccessMsg}</p>
+              </div>
+            ) : (
+              <form onSubmit={handleBuyMerchantInput} className="space-y-4">
+                <div className="bg-gray-50 p-4 rounded-2xl space-y-1 text-xs">
+                  <div className="flex justify-between"><span className="text-gray-500">Merchant:</span> <span className="font-semibold">{selectedMerchantItem.merchant}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Price:</span> <span className="font-mono font-bold text-emerald-700">₦{selectedMerchantItem.priceNGN.toLocaleString()}</span></div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 rounded-2xl text-xs shadow-md transition-all"
+                >
+                  Pay & Lock Escrow (₦{selectedMerchantItem.priceNGN.toLocaleString()})
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}
